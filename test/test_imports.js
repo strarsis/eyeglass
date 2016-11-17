@@ -149,15 +149,16 @@ describe("eyeglass importer", function () {
     testutils.assertCompiles(options, expected, done);
   });
 
-  it("lets you import sass files from dev dependencies", function (done) {
+  it("lets you import sass files from dev and peer dependencies", function (done) {
     var options = {
-      data: '@import "module_a";',
+      data: '@import "module_a"; @import "module_peer"; @import "module_b";',
       eyeglass: {
-        root: testutils.fixtureDirectory("dev_deps")
+        root: testutils.fixtureDirectory("dev_peer_deps")
       }
     };
     var expected = ".module-a {\n  greeting: hello world; }\n\n" +
-                   ".sibling-in-module-a {\n  sibling: yes; }\n";
+                   ".sibling-in-module-a {\n  sibling: yes; }\n\n" +
+                   "/* module_peer */\n/* module_b */\n/* module_peer/foo */\n";
     testutils.assertCompiles(options, expected, done);
   });
 
@@ -231,6 +232,18 @@ describe("eyeglass importer", function () {
     };
     var expected = ".module-a {\n  greeting: hello world; }\n\n" +
                    ".sibling-in-module-a {\n  sibling: yes; }\n";
+    testutils.assertCompiles(options, expected, done);
+  });
+
+  it("imports modules that use the module name instead index.", function(done) {
+    var options = {
+      data: '@import "compatible-module";',
+      eyeglass: {
+        root: testutils.fixtureDirectory("compatible_module")
+      }
+    };
+    var expected = ".is-a-compatible-submodule {\n  this: is a compatible submodule; }\n\n" +
+                   ".is-a-compatible-module {\n  this: is a compatible module; }\n";
     testutils.assertCompiles(options, expected, done);
   });
 
@@ -389,5 +402,171 @@ describe("eyeglass importer", function () {
     };
     var expected = ".from {\n  include: path; }\n";
     testutils.assertCompiles(options, expected, done);
+  });
+
+  it("should compile multiple files with imports (#114)", function(done) {
+    var rootDir = testutils.fixtureDirectory("issue-114");
+    var files = ["main1.scss", "main2.scss", "main3.scss", "main4.scss"];
+
+    var promises = files.map(function(file) {
+      return new Promise(function(fulfill, reject) {
+        var options = {
+          file: path.join(rootDir, "sass", file),
+          eyeglass: {
+            root: rootDir
+          }
+        };
+        var expected = "/* partial */\n";
+        testutils.assertCompiles(options, expected, function(err) {
+          if (err) {
+            reject(err);
+          } else {
+            fulfill();
+          }
+        });
+      });
+    });
+
+    // when all the promises finish
+    Promise.all(promises).then(function() {
+      done();
+    }, done);
+  });
+
+  it("should be allowed to import from eyeglass without a declared dependency", function(done) {
+    var options = {
+      data: '@import "module_a";',
+      eyeglass: {
+        root: testutils.fixtureDirectory("module_imports_eyeglass")
+      }
+    };
+    var expected = "/* function-exists(asset-url): true */\n";
+    testutils.assertCompiles(options, expected, done);
+  });
+
+  it("should not require(main) if not an eyeglass module", function(done) {
+    var root = testutils.fixtureDirectory("no_main_if_not_module");
+    var options = {
+      file: path.join(root, "test.scss"),
+      eyeglass: {
+        root: root
+      }
+    };
+    var expected = "/* testing */\n";
+    testutils.assertCompiles(options, expected, done);
+  });
+
+  it("should not import `index` for non-existent files", function(done) {
+    var rootDir = testutils.fixtureDirectory("simple_module");
+    var options = {
+      data: '@import "simple-module/invalid";',
+      eyeglass: {
+        root: rootDir
+      }
+    };
+
+    var expectedError = [
+      "sass/this-does-not-exist.scss",
+      "sass/this-does-not-exist.sass",
+      "sass/this-does-not-exist.css",
+      "sass/_this-does-not-exist.scss",
+      "sass/_this-does-not-exist.sass",
+      "sass/_this-does-not-exist.css",
+      "sass/this-does-not-exist/index.scss",
+      "sass/this-does-not-exist/index.sass",
+      "sass/this-does-not-exist/index.css",
+      "sass/this-does-not-exist/_index.scss",
+      "sass/this-does-not-exist/_index.sass",
+      "sass/this-does-not-exist/_index.css"
+    ].reduce(function(msg, location) {
+      return msg + "\n  " + path.resolve(rootDir, location);
+    }, "Error: Could not import this-does-not-exist from any of the following locations:");
+
+    testutils.assertCompilationError(options, expectedError, done);
+  });
+
+  it("should import files with extensions", function(done) {
+    var options = {
+      data: '@import "simple-module/bar";',
+      eyeglass: {
+        root: testutils.fixtureDirectory("simple_module")
+      }
+    };
+
+    var expected = "/* baz.css */\n/* _qux.scss */\n";
+
+    testutils.assertCompiles(options, expected, done);
+  });
+
+  describe("manual modules", function() {
+    it("should support manually added module", function(done) {
+      var manualModule = require(testutils.fixtureDirectory("manual_module"));
+      var rootDir = testutils.fixtureDirectory("simple_module");
+      var options = {
+        data: '@import "my-manual-module"; .test { hello: manual-hello(); }',
+        eyeglass: {
+          root: rootDir,
+          modules: [manualModule]
+        }
+      };
+      var expected = ".manual-module {\n  works: true; }\n\n"
+                   + ".test {\n  hello: \"Hello World!\"; }\n";
+      testutils.assertCompiles(options, expected, done);
+    });
+
+    it("should support manually added module via path", function(done) {
+      var manualModulePath = testutils.fixtureDirectory("manual_module");
+      var manualModule = require(manualModulePath);
+      // add a bower module with a given path
+      var bowerModule = {
+        path: path.join(manualModulePath, "bower_components/bower-module")
+      };
+      var rootDir = testutils.fixtureDirectory("simple_module");
+      var options = {
+        data: "@import \"bower-module\"; @import \"my-manual-module\";"
+            + ".test { hello: manual-hello(); }",
+        eyeglass: {
+          root: rootDir,
+          modules: [manualModule, bowerModule]
+        }
+      };
+      var expected = "/* bower-module */\n.manual-module {\n  works: true; }" +
+        "\n\n.test {\n  hello: \"Hello World!\"; }\n";
+      testutils.assertCompiles(options, expected, done);
+    });
+
+    it("should allow manually declared dependencies", function(done) {
+      var manualModulePath = testutils.fixtureDirectory("manual_module");
+      var rootDir = testutils.fixtureDirectory("simple_module");
+      var options = {
+        data: "@import \"module_b\";",
+        eyeglass: {
+          root: rootDir,
+          modules: [
+            // my-manual-module
+            require(manualModulePath),
+
+            // module_a
+            {
+              path: path.join(manualModulePath, "module_a"),
+              dependencies: {
+                "my-manual-module": "*"
+              }
+            },
+
+            // module_b
+            {
+              path: path.join(manualModulePath, "module_b"),
+              dependencies: {
+                "module_a": "*"
+              }
+            }
+          ]
+        }
+      };
+      var expected = "/* module_b */\n/* module_a */\n"
+                   + ".manual-module {\n  works: true; }\n\n/* module_c */\n";
+      testutils.assertCompiles(options, expected, done);
+    });
   });
 });

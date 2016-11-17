@@ -22,7 +22,63 @@ Once installed via npm, an eyeglass module can:
 * Provide stylesheets that you can import with special node_module syntax.
 * Add additional custom functions to Sass that are written in javascript.
 
-In Sass files, you can reference the eyeglass module with standard Sass import syntax: `@import "my_eyeglass_module/file";`. The `my_eyeglass_module` will be resolved to the correct directory in your node modules, and the file will then resolve using the standard import rules for Sass.
+If your build-tool is [eyeglass-aware](#building-sass-files-with-eyeglass-support), you can reference the eyeglass module with standard Sass import syntax: `@import "my_eyeglass_module/file";`. The `my_eyeglass_module` will be resolved to the correct directory in your node modules, and the file will then resolve using the standard import rules for Sass.
+
+## Manually adding modules
+
+Eyeglass will transitively auto-discover npm installed modules that are listed in
+your `package.json` files. Just using `npm link` is not enough to use
+modules on your local filesystem. If that isn't sufficient, you can use
+the `eyeglass.modules` config option to specify a path to your npm
+module or to even declare an eyeglass module for a project that doesn't
+declare itself to be one.
+
+To add modules that are not part of the npm ecosystem, you can manually
+add modules via the eyeglass options:
+
+```js
+var sass = require("node-sass");
+var eyeglass = require("eyeglass");
+var options = {
+  eyeglass: {
+    modules: [
+      // add module by path (must have a valid package.json)
+      {
+        path: "/path/to/your/module"
+      },
+      // add module by Object
+      {
+        name: "my-module-name",
+        main: function(eyeglass, sass) {
+          return {
+            sassDir: ...,
+            functions: ...,
+            ...
+          }
+        },
+        eyeglass: {
+          needs: "...",
+          ...
+        }
+      }
+    ]
+  }
+};
+sass.render(eyeglass(options), sass));
+```
+
+When adding a module by object, the object has the same format as the
+object in an eyeglass module's package.json that would normally be
+assigned to top-level `eyeglass` property. However, it supports one
+additional property: `main`. The `main` object is a function as would be
+returned by requiring the eyeglass `exports` file.  In this way, it is
+possible to expose any arbitrary Sass project as an eyeglass module
+without that module being required to "become an eyeglass" module. This
+also enables the use of bower packages with Eyeglass.
+
+Manually added eyeglass modules will only be able to be imported by the
+main application's sass files. Dependencies between such manual modules
+are not currently supported.
 
 # Working with assets
 
@@ -33,6 +89,8 @@ generating urls to those assets as well as making sure only those assets
 that you actually use end up in your built application.
 
 ## Exposing assets
+
+### In your application
 
 The `addSource` method on `eyeglass.assets` is how you add assets to
 your application. The path passed to `asset-url()` is going to be
@@ -61,37 +119,129 @@ compile a Sass file.
 #!/usr/bin/env node
 var path = require("path");
 var sass = require("node-sass");
-var Eyeglass = require("eyeglass").Eyeglass;
+var eyeglass = require("eyeglass");
 var rootDir = __dirname;
 var assetsDir = path.join(rootDir, "assets");
 
 var options = { ... node-sass options ... };
 
 
-// specifying root lets the script run from any directory instead of having to be in the same directory.
-options.root = rootDir;
+options.eyeglass = {
+  // specifying root lets the script run from any directory instead of having to be in the same directory.
+  root: rootDir,
 
-// where assets are installed by eyeglass to expose them according to their output url.
-// If not provided, assets are not installed unless you provide a custom installer.
-options.buildDir = path.join(rootDir, "dist");
+  // where assets are installed by eyeglass to expose them according to their output url.
+  // If not provided, assets are not installed unless you provide a custom installer.
+  buildDir: path.join(rootDir, "dist"),
 
-// prefix to give assets for their output url.
-options.assetsHttpPrefix = "assets";
+  assets: {
+    // prefix to give assets for their output url.
+    httpPrefix: "assets",
 
-var eyeglass = new Eyeglass(options, sass);
-
-// Add assets except for js and sass files
-// The url passed to asset-url should be
-// relative to the assets directory specified.
-eyeglass.assets.addSource(assetsDir, {
-  globOpts: { ignore: ["**/*.js", "**/*.scss"] }
-});
+    // Add assets except for js and sass files
+    // The url passed to asset-url should be
+    // relative to the assets directory specified.
+    sources: [
+      {directory: assetsDir, globOpts: { ignore: ["**/*.js", "**/*.scss"] }}
+    ]
+  }
+}
 
 // Standard node-sass rendering of a single file.
-sass.render(eyeglass.sassOptions(), function(err, result) {
+sass.render(eyeglass(options, sass), function(err, result) {
   // handle results
 });
 ```
+
+### In the module
+
+In function that you export from your `eyeglass-exports.js`, you have the
+`eyeglass` as the first parameter. It has `assets` property, and it has the
+method `export` that accepts the same arguments as `addSource` and returns a
+new instance of assets list with the given path already included in the list
+with provided options.
+
+To expose it, you need to set it as `assets` property on the object you return
+from exported function:
+
+```js
+module.exports = function(eyeglass, sass) {
+  return {
+    assets: eyeglass.assets.export('some/path/here'),
+  };
+};
+```
+
+See the `Examples` section below for more details.
+
+#### Examples
+
+Let's say your module has structure like this:
+
+```
+mymodule/
+└── assets/
+    ├── images/
+    │   ├── foo/
+    │   │   └── image1.png
+    │   └── unused.gif
+    ├── fonts/
+    │   └── coolfont.ttf
+    └── scss/
+        └── app.scss
+```
+
+If you don't require per-path options or fine-grained control of what can be
+imported from SASS, you can use just one path:
+
+```js
+var path = require('path');
+
+var assets_path = path.join(__dirname, 'assets');
+
+module.exports = function(eyeglass, sass) {
+  return {
+    sassDir: path.join(assets_path, 'scss'),
+    assets: eyeglass.assets.export(assets_path, {
+      globOpts: {
+        ignore: [ '**/*.scss', '**/*.js' ]
+      }
+    });
+  }
+};
+```
+
+But if you want more fine-grained control, you can save the result of
+`assets.export()` to the variable and call `addSource` on it any amount of
+times:
+
+```js
+var path = require('path');
+
+var assets_path = path.join(__dirname, 'assets');
+var images_path = path.join(assets_path, 'images');
+var fonts_path = path.join(assets_path, 'fonts');
+
+var images_options = { ... images-related options ... };
+var fonts_options = { ... fonts-related options ... };
+
+module.exports = function(eyeglass, sass) {
+  // Create new list of assets with at least one path
+  var module_assets = eyeglass.assets.export(images_path, images_options);
+
+  // You can add more paths like this
+  module_assets.addSource(fonts_path, fonts_options);
+
+  return {
+    sassDir: path.join(assets_path, 'stylesheets'),
+    assets: module_assets
+  }
+};
+```
+
+Note that in this case, given the name of the module is `mymodule`,
+the `coolfont.ttf` and `foo/image1.png` will be avilable
+as `mymodule/coolfont.ttf` and `mymodule/foot/image1.png` accordingly.
 
 ## Referencing Assets
 
@@ -244,26 +394,30 @@ Eyeglass is designed to be easy to use with any node-sass based
 compilation system.
 
 ```js
-var Eyeglass = require("eyeglass").Eyeglass;
+var eyeglass = require("eyeglass");
 var sass = require("node-sass")
 var sassOptions = { ... } ; // options for node-sass
-var eyeglass = new Eyeglass(sassOptions);
 
-// futher configuration of the eyeglass instance can happen here.
+// eyeglass specific options are passed via the `eyeglass` key in the sass options.
+sassOptions.eyeglass {
+  assets: {
+    sources: [
+      // Expose images in the assets/images directory as /images on the
+      // website by putting the images we reference with asset-url()
+      // into the public/images directory.
+      {directory: "assets", {pattern: "images/**/*"}},
 
-// Expose images in the assets/images directory as /images on the
-// website by putting the images we reference with asset-url()
-// into the public/images directory.
-eyeglass.assets.addSource("assets", {pattern: "images/**/*"});
+      // Expose fonts in the assets/fonts directory as /fonts on the
+      // website by putting the fonts we reference with asset-url()
+      // into the public/fonts directory.
+      {directory: "assets", {pattern: "fonts/**/*"}}
+    ]
+  }
+}
 
-// Expose fonts in the assets/fonts directory as /fonts on the
-// website by putting the fonts we reference with asset-url()
-// into the public/fonts directory.
-eyeglass.assets.addSource("assets", {pattern: "fonts/**/*"});
-
-// These options can be passed to any sass build tool that passes
-// options through to node-sass.
-sass.render(eyeglass.sassOptions(), function(error, result) {
+// These options are processed and returned as options that can be passed to any build tool
+// that passes options through to node-sass.
+sass.render(eyeglass(sassOptions), function(error, result) {
   if (error) {
     //handle the compilation error
   } else {
@@ -279,9 +433,7 @@ sass.render(eyeglass.sassOptions(), function(error, result) {
 var eyeglass = require("eyeglass");
 ...
 sass: {
-    options: eyeglass.decorate({
-        sourceMap: true
-    }),
+    options: eyeglass({sourceMap: true}),
     dist: {
         files: {
             'public/css/main.css': 'sass/main.scss'
@@ -306,6 +458,7 @@ eyeglass module, add the `eyeglass-module` keyword to your
   ...
   "keywords": ["eyeglass-module", "sass", ...],
   "eyeglass": {
+    "sassDir": "sass",
     "exports": "eyeglass-exports.js",
     "name": "greetings",
     "needs": "^0.6.0"
@@ -322,10 +475,9 @@ if your module is compatible with the currect eyeglass version.
 
 ### Eyeglass Exports File
 
-Your requirable module exports an object that describes your module's
-structure and can expose javascript functions as sass functions. It is
-convention to name this file `eyeglass-exports.js` but any file name is
-allowed.
+If your eyeglass module needs to define Sass functions in javascript,
+you will need to make an eyeglass exports file. It is convention to name
+this file `eyeglass-exports.js` but any file name is allowed.
 
 Below is an example eyeglass exports file:
 
@@ -336,7 +488,6 @@ var path = require("path");
 
 module.exports = function(eyeglass, sass) {
   return {
-    sassDir: path.join(__dirname, "sass"),
     functions: {
       "greetings-hello($name: 'World')": function(name, done) {
         done(sass.types.String("Hello, " + name.getValue()));
@@ -348,13 +499,16 @@ module.exports = function(eyeglass, sass) {
 
 If the `eyeglass.exports` option is not found in `package.json` eyeglass
 will fall back to using the npm standard `main` file declared in your
-package.json.
+package.json.  If your npm module has a main file meant to be used generally by
+javascript, but no eyeglass exports file, then you can simply set
+`eyeglass.exports` option to `false` in your `package.json`.
+
 
 Since all functions declared from javascript are global, it is best
 practice to scope your function names to avoid naming conflicts. Then,
 to simplify the naming of your functions for the normal case, provide a
 sass file that when imported, unscopes the function names by wrapping
-them. 
+them.
 
 ```scss
 // index.scss
@@ -388,12 +542,51 @@ Any sass files imported from your node modules will only ever be
 imported once per CSS output file. Note that Sass files imported
 from the Sass load path will have the standard Sass `@import` behavior.
 
-To disable the import-once behavior, you need to set `enableImportOnce`
-to false:
+To disable the import-once behavior, you need to set the `enableImportOnce`
+option to false:
 
 ```js
-var Eyeglass = require("eyeglass").Eyeglass;
-var sassOptions = {};
-var eyeglass = new Eyeglass(sassOptions);
-eyeglass.enableImportOnce = false;
+var sass = require("node-sass");
+var eyeglass = require("eyeglass");
+var sassOptions = {
+  eyeglass: {
+    enableImportOnce: false
+  }
+};
+
+sass.render(eyeglass(sassOptions, sass));
 ```
+
+# URI path normalization
+
+By default, eyeglass will normalize path separators for interoperability between different platforms (Windows,
+Unix, etc). While we don't anticipate any issues with this feature, you can opt-out of this feature if you do
+encounter issues. Please do report any such issues so we may investigate. If you disable this feature,
+eyeglass will not work on Windows platforms.
+
+## Opt-Out via Environment Variable
+
+Setting an environment variable `EYEGLASS_NORMALIZE_PATHS=false`
+
+## Opt-Out via Config Option
+
+Explicitly via eyeglass options:
+```js
+var sass = require("node-sass");
+var eyeglass = require("eyeglass");
+var options = {
+  eyeglass: {
+    normalizePaths: false
+  }
+};
+sass.render(eyeglass(options), sass));
+```
+
+## `asset-uri`/`asset-url` string literals are not normalized
+
+When using the `asset-uri` and `asset-url`, the URI string passed are not normalized. This is to
+ensure that the URI always uses valid web path separators (`/`) rather than file system path separators.
+That is `asset-uri('path/to/file.png)` will resolve the correct file asset on any platform, but
+`asset-url('foo\\bar.png')` will expect to find a file with a literal `\` in it's name
+(`foo\\bar.png`), not a file located at `foo/bar.png`. We encourage you _not_ to use backslashes in
+your file names, as this means your code cannot easily be ported to Windows platforms.

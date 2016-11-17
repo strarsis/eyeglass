@@ -13,6 +13,19 @@ describe("options", function() {
     done();
   });
 
+  it("should wrap options when not an instance", function(done) {
+    var rootDir = testutils.fixtureDirectory("app_with_malformed_module");
+    /* eslint new-cap:0 */
+    var options = Eyeglass({
+      eyeglass: {
+        root: rootDir
+      }
+    });
+    assert(options);
+    assert(options.eyeglass.root);
+    done();
+  });
+
   it("should not contain a circular reference to itself", function(done) {
     var rootDir = testutils.fixtureDirectory("app_with_malformed_module");
     var options = {root: rootDir};
@@ -24,7 +37,7 @@ describe("options", function() {
   });
 
   it("uses the SASS_PATH environment variable as a default for includePaths", function(done) {
-    process.env.SASS_PATH = "foo:bar:baz";
+    process.env.SASS_PATH = ["foo", "bar", "baz"].join(path.delimiter);
 
     var rootDir = testutils.fixtureDirectory("basic_modules");
     var options = {root: rootDir};
@@ -61,7 +74,7 @@ describe("options", function() {
     var rootDir = testutils.fixtureDirectory("app_assets");
     var eyeglass = new Eyeglass({
       root: rootDir,
-      includePaths: includePaths.join(":")
+      includePaths: includePaths.join(path.delimiter)
     });
     var sassopts = eyeglass.options;
     assert(sassopts);
@@ -92,6 +105,8 @@ describe("options", function() {
       var rootDir = testutils.fixtureDirectory("basic_modules");
       var options = {
         root: rootDir,
+        assetsHttpPrefix: "foo",
+        assetsRelativeTo: "/styles/main.css",
         eyeglass: {
           ignoreDeprecations: "0.7.1"
         }
@@ -107,6 +122,87 @@ describe("options", function() {
         "    ...",
         "    eyeglass: {",
         "      root: ...",
+        "    }",
+        "  });",
+        "[eyeglass:deprecation] (deprecated in 0.8.0, will be removed in 0.9.0) " +
+        "`assetsHttpPrefix` has been renamed to `httpPrefix` and should be passed into " +
+        "the eyeglass asset options rather than the sass options:",
+        "  var options = eyeglass({",
+        "    /* sassOptions */",
+        "    ...",
+        "    eyeglass: {",
+        "      assets: {",
+        "        httpPrefix: ...",
+        "      }",
+        "    }",
+        "  });",
+        "[eyeglass:deprecation] (deprecated in 0.8.0, will be removed in 0.9.0) " +
+        "`assetsRelativeTo` has been renamed to `relativeTo` and should be passed into " +
+        "the eyeglass asset options rather than the sass options:",
+        "  var options = eyeglass({",
+        "    /* sassOptions */",
+        "    ...",
+        "    eyeglass: {",
+        "      assets: {",
+        "        relativeTo: ...",
+        "      }",
+        "    }",
+        "  });",
+        "[eyeglass:deprecation] (deprecated in 0.8.0, will be removed in 0.9.0) " +
+        "`require('eyeglass').Eyeglass` is deprecated. Instead, use `require('eyeglass')`",
+        "[eyeglass:deprecation] (deprecated in 0.8.0, will be removed in 0.9.0) " +
+        "#sassOptions() is deprecated. Instead, you should access the sass options on #options\n"
+      ].join("\n"));
+      done();
+    });
+  });
+
+  it("should use default verion of `0.0.0` if `ignoreDeprecations: false`", function(done) {
+    testutils.assertStderr(function(checkStderr) {
+      var rootDir = testutils.fixtureDirectory("basic_modules");
+      var options = {
+        root: rootDir,
+        assetsHttpPrefix: "foo",
+        assetsRelativeTo: "/styles/main.css",
+        eyeglass: {
+          ignoreDeprecations: false
+        }
+      };
+      var eyeglass = new Eyeglass.Eyeglass(options);
+      /* eslint no-unused-vars:0 */
+      var sassopts = eyeglass.sassOptions();
+      checkStderr([
+        "[eyeglass:deprecation] (deprecated in 0.8.0, will be removed in 0.9.0) `root` " +
+        "should be passed into the eyeglass options rather than the sass options:",
+        "  var options = eyeglass({",
+        "    /* sassOptions */",
+        "    ...",
+        "    eyeglass: {",
+        "      root: ...",
+        "    }",
+        "  });",
+        "[eyeglass:deprecation] (deprecated in 0.8.0, will be removed in 0.9.0) " +
+        "`assetsHttpPrefix` has been renamed to `httpPrefix` and should be passed into " +
+        "the eyeglass asset options rather than the sass options:",
+        "  var options = eyeglass({",
+        "    /* sassOptions */",
+        "    ...",
+        "    eyeglass: {",
+        "      assets: {",
+        "        httpPrefix: ...",
+        "      }",
+        "    }",
+        "  });",
+        "[eyeglass:deprecation] (deprecated in 0.8.0, will be removed in 0.9.0) " +
+        "`assetsRelativeTo` has been renamed to `relativeTo` and should be passed into " +
+        "the eyeglass asset options rather than the sass options:",
+        "  var options = eyeglass({",
+        "    /* sassOptions */",
+        "    ...",
+        "    eyeglass: {",
+        "      assets: {",
+        "        relativeTo: ...",
+        "      }",
         "    }",
         "  });",
         "[eyeglass:deprecation] (deprecated in 0.8.0, will be removed in 0.9.0) " +
@@ -168,6 +264,22 @@ describe("options", function() {
           "});"
         ].join("\n  ");
       }
+      function expectedAssetOptionsWarning(originalName, newName) {
+        return [
+          "[eyeglass:deprecation] (deprecated in 0.8.0, will be removed in 0.9.0) `" +
+          originalName + "` has been renamed to `" + newName + "` and should be passed " +
+          "into the eyeglass asset options rather than the sass options:",
+          "var options = eyeglass({",
+          "  /* sassOptions */",
+          "  ...",
+          "  eyeglass: {",
+          "    assets: {",
+          "      " + newName + ": ...",
+          "    }",
+          "  }",
+          "});"
+        ].join("\n  ");
+      }
 
       testutils.assertStderr(function(checkStderr) {
         var eyeglass = new Eyeglass({
@@ -184,29 +296,15 @@ describe("options", function() {
           expectedOptionsWarning("cacheDir"),
           expectedOptionsWarning("buildDir"),
           expectedOptionsWarning("httpRoot"),
-          expectedOptionsWarning("assetsHttpPrefix"),
-          expectedOptionsWarning("assetsRelativeTo"),
-          expectedOptionsWarning("strictModuleVersions")
+          expectedOptionsWarning("strictModuleVersions"),
+          expectedAssetOptionsWarning("assetsHttpPrefix", "httpPrefix"),
+          expectedAssetOptionsWarning("assetsRelativeTo", "relativeTo")
         ].join("\n") + "\n");
         done();
       });
     });
 
-    it("should warn when setting properties directly on eyeglass instance", function(done) {
-      function expectedOptionsWarning(option) {
-        return [
-          "[eyeglass:deprecation] (deprecated in 0.8.0, will be removed in 0.9.0) `" +
-          option + "` should be passed into the eyeglass options rather than the sass options:",
-          "var options = eyeglass({",
-          "  /* sassOptions */",
-          "  ...",
-          "  eyeglass: {",
-          "    " + option + ": ...",
-          "  }",
-          "});"
-        ].join("\n  ");
-      }
-
+    it("should warn when setting deprecated property directly on instance", function(done) {
       testutils.assertStderr(function(checkStderr) {
         var eyeglass = new Eyeglass();
         eyeglass.enableImportOnce = false;
@@ -219,6 +317,39 @@ describe("options", function() {
           "    ...",
           "    eyeglass: {",
           "      enableImportOnce: ...",
+          "    }",
+          "  });"
+        ].join("\n") + "\n");
+        done();
+      });
+    });
+
+    it("should warn when getting deprecated property directly on instance", function(done) {
+      testutils.assertStderr(function(checkStderr) {
+        var eyeglass = new Eyeglass();
+        var isEnabled = eyeglass.enableImportOnce;
+        checkStderr([
+          "[eyeglass:deprecation] (deprecated in 0.8.0, will be removed in 0.9.0) " +
+          "The property `enableImportOnce` should no longer be accessed directly on eyeglass. " +
+          "Instead, you'll find the value on `eyeglass.options.eyeglass.enableImportOnce`"
+        ].join("\n") + "\n");
+        done();
+      });
+    });
+
+    it("should warn when passing sass engine as argument", function(done) {
+      testutils.assertStderr(function(checkStderr) {
+        var eyeglass = new Eyeglass({}, require("node-sass"));
+        checkStderr([
+          "[eyeglass:deprecation] (deprecated in 0.8.0, will be removed in 0.9.0) " +
+          "You should no longer pass `sass` directly to Eyeglass. Instead pass it as an option:",
+          "  var options = eyeglass({",
+          "    /* sassOptions */",
+          "    ...",
+          "    eyeglass: {",
+          "      engines: {",
+          "        sass: require('node-sass')",
+          "      }",
           "    }",
           "  });"
         ].join("\n") + "\n");

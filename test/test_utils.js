@@ -1,11 +1,12 @@
 "use strict";
 
 var assert = require("assert");
-var unquote = require("../lib/util/unquote");
-var sync = require("../lib/util/sync_fn");
+var stringUtils = require("../lib/util/strings");
+var unquote = stringUtils.unquote;
+var sync = require("../lib/util/sync");
 var sass = require("node-sass");
 var testutils = require("./testutils");
-var EyeglassModules = require("../lib/util/eyeglass_modules");
+var EyeglassModules = require("../lib/modules/EyeglassModules");
 
 describe("utilities", function () {
 
@@ -43,10 +44,10 @@ describe("utilities", function () {
     var eyeglass = {};
     var modules = new EyeglassModules(dir);
     var egModule = modules.find("is-a-module");
-    var egExports = require(egModule.main)(eyeglass, sass);
-    assert(egExports);
-    assert.equal(egExports.sassDir, dir);
-    assert(egExports.functions);
+    egModule.init(eyeglass, sass);
+    assert(egModule);
+    assert.equal(egModule.sassDir, dir);
+    assert(egModule.functions);
     done();
  });
 
@@ -78,5 +79,17 @@ describe("utilities", function () {
    var resultB = syncFnB();
    assert.equal(resultA, expected, "handles async functions with callbacks");
    assert.equal(resultB, expected, "handles sync functions without callbacks");
+ });
+
+ it("quote handles Sass strings", function(done) {
+   assert.equal('"asdf"', stringUtils.quote(sass.types.String("asdf")).getValue());
+   done();
+ });
+
+ it("tmpl should preserve placeholders if not in data", function(done) {
+   var tmpl = "${foo} ${bar}";
+   var result = stringUtils.tmpl(tmpl, {}); // no data
+   assert.equal(tmpl, result);
+   done();
  });
 });
