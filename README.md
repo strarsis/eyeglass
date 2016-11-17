@@ -144,11 +144,15 @@ options.eyeglass = {
     sources: [
       {directory: assetsDir, globOpts: { ignore: ["**/*.js", "**/*.scss"] }}
     ]
+  },
+
+  engines: {
+    sass: sass
   }
 }
 
 // Standard node-sass rendering of a single file.
-sass.render(eyeglass(options, sass), function(err, result) {
+sass.render(eyeglass(options), function(err, result) {
   // handle results
 });
 ```
